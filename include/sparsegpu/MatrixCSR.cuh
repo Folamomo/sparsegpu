@@ -1,17 +1,17 @@
-#ifndef SPARSEGPU_MATRIXCSRDEV_CUH
-#define SPARSEGPU_MATRIXCSRDEV_CUH
+#ifndef SPARSEGPU_MATRIXCSR_CUH
+#define SPARSEGPU_MATRIXCSR_CUH
 
 #include <cstdint>
 
 namespace sparsegpu{
 
     /**
-     * Stores matrices in Compressed Sparse Row-wise format on the GPU
+     * Stores matrices in Compressed Sparse Row-wise format on the Host
      * @tparam Value type of values stored in the matrix
      * @tparam Index type used to store indices and offsets
      */
     template<typename Value, typename Index = int32_t>
-    class MatrixCSRDev{
+    class MatrixCSR{
     public:
         Index rows;
         Index columns;
@@ -20,22 +20,22 @@ namespace sparsegpu{
         Value* values;
         Index* column_indices;
         Index* row_offsets;
+
         /**
-         * Constructs an empty CSR matrix with space for element_count elements on the GPU
+         * Constructs an empty CSR matrix with space for element_count elements on the Host
          * Values, column indices and row_offsets are allocated and should be initialized immediately
          * @param rows height of the matrix
          * @param cols width of the matrix
          * @param element_count number of nonzero elements
          */
-        MatrixCSRDev(Index rows, Index columns, Index element_count):
+        MatrixCSR(Index rows, Index columns, Index element_count):
             rows(rows),
             columns(columns),
-            element_count(element_count)
-        {
-            cudaMalloc(&values, element_count * sizeof (Value));
-            cudaMalloc(&column_indices, element_count * sizeof(Index));
-            cudaMalloc(&row_offsets, (rows + 1)* sizeof(Index));
-        }
+            element_count(element_count),
+            values(new Value[element_count]),
+            column_indices(new Index[element_count]),
+            row_offsets(new Index[rows + 1]){}
+
 
         /**
          * Constructs CSR matrix using previously allocated storage on th GPU
@@ -47,7 +47,7 @@ namespace sparsegpu{
          * @param row_offsets pointer to allocated row offsets
          */
 
-        MatrixCSRDev(Index rows, Index columns, Index element_count,
+        MatrixCSR(Index rows, Index columns, Index element_count,
                      Value* values, Index* column_indices, Index* row_offsets) noexcept:
         rows(rows),
         columns(columns),
@@ -62,29 +62,29 @@ namespace sparsegpu{
          * Copy constructor
          * @param other
          */
-        MatrixCSRDev(const MatrixCSRDev<Value, Index>& other):
-                MatrixCSRDev(other.rows, other.columns, other.element_count){
-            cudaMemcpy(values, other.values, element_count * sizeof(Value), cudaMemcpyKind::cudaMemcpyDeviceToDevice);
-            cudaMemcpy(column_indices, other.columnIndices, element_count * sizeof(Index), cudaMemcpyKind::cudaMemcpyDeviceToDevice);
-            cudaMemcpy(row_offsets, other.rowOffsets, (other.rows + 1) * sizeof(Index), cudaMemcpyKind::cudaMemcpyDeviceToDevice);
+        MatrixCSR(const MatrixCSR<Value, Index>& other):
+                MatrixCSR(other.rows, other.columns, other.element_count){
+            std::copy(other.values, other.values + element_count, values);
+            std::copy(other.column_indices, other.column_indices + element_count, column_indices);
+            std::copy(other.row_offsets, other.row_offsets + rows + 1, row_offsets);
         }
 
         /**
          * Move constructor
          * @param other
          */
-        MatrixCSRDev(MatrixCSRDev<Value, Index>&& other) noexcept:
-                MatrixCSRDev(other.rows, other.columns, other.element_count,
+        MatrixCSR(MatrixCSR<Value, Index>&& other) noexcept:
+                MatrixCSR(other.rows, other.columns, other.element_count,
                              other.values, other.column_indices, other.row_offsets){
             other.values = nullptr;
             other.column_indices = nullptr;
             other.row_offsets = nullptr;
         }
 
-        ~MatrixCSRDev(){
-            cudaFree(values);
-            cudaFree(column_indices);
-            cudaFree(row_offsets);
+        ~MatrixCSR(){
+            delete[](values);
+            delete[](column_indices);
+            delete[](row_offsets);
         }
 
         /**
@@ -93,10 +93,10 @@ namespace sparsegpu{
          * @param columns
          * @return Empty matrix
          */
-        static MatrixCSRDev<Value, Index> empty(Index rows, Index columns){
-            return MatrixCSRDev<Value, Index>(rows, columns, 0);
+        static MatrixCSR<Value, Index> empty(Index rows, Index columns){
+            return MatrixCSR<Value, Index>(rows, columns, 0);
         }
     };
 }
 
-#endif //SPARSEGPU_MATRIXCSRDEV_CUH
+#endif //SPARSEGPU_MATRIXCSR_CUH
