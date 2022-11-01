@@ -94,7 +94,9 @@ namespace sparsegpu{
          * @return Empty matrix
          */
         static MatrixCSR<Value, Index> empty(Index rows, Index columns){
-            return MatrixCSR<Value, Index>(rows, columns, 0);
+            MatrixCSR<Value, Index> result{rows, columns, 0};
+            std::fill_n(result.row_offsets, rows + 1, Index(0));
+            return result;
         }
     };
 }

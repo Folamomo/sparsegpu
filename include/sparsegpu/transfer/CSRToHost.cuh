@@ -1,13 +1,11 @@
 #ifndef SPARSEGPU_CSRTOHOST_CUH
 #define SPARSEGPU_CSRTOHOST_CUH
 
-#include "../MatrixCSR.cuh"
-#include "../MatrixCSRDev.cuh"
-
-#include <cstdint>
+#include <sparsegpu/types/MatrixCSR.cuh>
+#include <sparsegpu/types/MatrixCSRDev.cuh>
 
 namespace sparsegpu{
-    template <typename Value, typename Index = int32_t>
+    template <typename Value, typename Index>
     sparsegpu::MatrixCSR<Value, Index> toHost(const MatrixCSRDev<Value, Index>& dev){
         auto result = MatrixCSR<Value, Index>(dev.rows, dev.columns, dev.element_count);
         cudaMemcpy(result.values, dev.values, result.element_count, cudaMemcpyKind::cudaMemcpyDeviceToHost);
@@ -16,6 +14,5 @@ namespace sparsegpu{
         return result;
     }
 }
-
 
 #endif //SPARSEGPU_CSRTOHOST_CUH

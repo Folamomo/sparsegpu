@@ -2,6 +2,7 @@
 #define SPARSEGPU_MATRIXCSRDEV_CUH
 
 #include <cstdint>
+#include <thrust/fill.h>
 
 namespace sparsegpu{
 
@@ -94,7 +95,9 @@ namespace sparsegpu{
          * @return Empty matrix
          */
         static MatrixCSRDev<Value, Index> empty(Index rows, Index columns){
-            return MatrixCSRDev<Value, Index>(rows, columns, 0);
+            MatrixCSRDev<Value, Index> result{rows, columns, 0};
+            thrust::fill_n(result.row_offsets, rows + 1, Index(0));
+            return result;
         }
     };
 }

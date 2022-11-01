@@ -1,7 +1,4 @@
-#include <sparsegpu/MatrixCSRDev.cuh>
-#include <sparsegpu/MatrixCSR.cuh>
-#include "sparsegpu/transfer/CSRToDev.cuh"
-#include "sparsegpu/transfer/CSRToHost.cuh"
+#include <sparsegpu/csr.h>
 
 int main(){
     sparsegpu::MatrixCSR<double> host{1, 1, 0};
