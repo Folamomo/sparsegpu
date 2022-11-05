@@ -6,6 +6,7 @@
 #include <sparsegpu/types/MatrixCSRDev.cuh>
 
 #include <thrust/scan.h>
+#include <thrust/device_ptr.h>
 
 #define GRID_DIM 4096
 
@@ -15,22 +16,52 @@ namespace sparsegpu{
         __global__ void countNonZeros(const Value* data, const Index* counts,
                                       const Index rows, const Index columns,
                                       const Value epsilon){
-            __shared__ Index results[32];
             for (Index row(blockIdx.x); row < rows; row += gridDim.x){
-                for(Index column(threadIdx.x); column < columns; column += 32){
-                    if(abs(data[row * columns + column]) <= epsilon) results[blockIdx.x]++;
+                Index elements_in_row(0);
+                for(Index column(0); column < columns; column += blockDim.x){
+                    int notZero = column + threadIdx.x < columns && abs(data[row * columns + column]) > epsilon;
+                    elements_in_row += __syncthreads_count(notZero);
                 }
+                if (threadIdx.x == 0){
+                    counts[row+1] = elements_in_row;
+                }
+            }
+        }
 
-                __syncwarp();
-                if (threadIdx.x% 2 == 0) results[threadIdx.x] += results[threadIdx.x + 1];
-                __syncwarp();
-                if (threadIdx.x% 4 == 0) results[threadIdx.x] += results[threadIdx.x + 2];
-                __syncwarp();
-                if (threadIdx.x% 8 == 0) results[threadIdx.x] += results[threadIdx.x + 4];
-                __syncwarp();
-                if (threadIdx.x%16 == 0) results[threadIdx.x] += results[threadIdx.x + 8];
-                __syncwarp();
-                if (threadIdx.x    == 0) counts [row] = results[0] + results[16];
+
+
+        template<typename Value, typename Index>
+        __global__ void copyElementsAndColumnIndices(
+                const Value* data,
+                const Index* row_offsets,
+                const Index* column_indices,
+                const Value* values,
+                const Index rows, const Index columns,
+                const Value epsilon){
+            for (Index row(blockIdx.x); row < rows; row += gridDim.x){
+                Index result_row_offset = row_offsets[row];
+                const Index next_row_offset = row_offsets[row+1];
+                Index left_column(0);
+
+                //until all non-zeros in a row are found
+                while (result_row_offset < next_row_offset){
+                    Index column = left_column + threadIdx.x;
+
+                    int predicate = column < columns && (data[row * columns + column]) > epsilon;
+                    unsigned ballot = __ballot_sync(0xffffffff, predicate);
+
+                    if (predicate) {
+                        //count how many non-zeros were found to the left of this thread
+                        int prev_zeros = __popcll(ballot & (0xffffffff << (warpSize - threadIdx.x)));
+                        Index offset = result_row_offset + prev_zeros;
+                        column_indices[offset] = column;
+                        values[offset] = data[row * columns + column];
+                    }
+
+                    //move result pointer by how many non-zeros were found
+                    result_row_offset += __popcll(ballot);
+                    left_column += warpSize;
+                }
             }
         }
     }
@@ -46,34 +77,43 @@ namespace sparsegpu{
     template <typename Value, typename Index>
     MatrixCSRDev<Value, Index> toCSR(const MatrixDenseDev<Value, Index> &dense, Value epsilon = Value(0)){
         Value* row_counts;
-        cudaMalloc(&row_counts, sizeof(Index) * dense.rows + 1);
+        cudaMalloc(&row_counts, sizeof(Index) * (dense.rows + 1));
 
-        // count non-zero elements in each row
-        impl::countNonZeros<<<dense.rows > GRID_DIM ? GRID_DIM : dense.rows, 32>>>(dense.data, row_counts + 1,
+        // count non-zero element_count in each row
+        impl::countNonZeros<<<dense.rows > GRID_DIM ? GRID_DIM : dense.rows, 512>>>(dense.data, row_counts + 1,
                                               dense.rows, dense.columns, epsilon);
 
-        thrust::inclusive_scan(row_counts + 1, row_counts + dense.rows + 1, row_counts+1);
+        //compute partial sum of row counts in-place
+        thrust::device_ptr<Index> row_counts_thrust(row_counts);
+        thrust::inclusive_scan(row_counts_thrust + 1, row_counts_thrust + dense.rows + 1, row_counts_thrust + 1);
 
+        //set first element in row_count to 0
         Index zero(0);
         cudaMemcpy(row_counts, &zero, sizeof(Index), cudaMemcpyKind::cudaMemcpyHostToDevice);
 
-        auto column_indices = new Index[element_count];
-        auto values = new Value[element_count];
+        //last element of row_counts now contains the count of all elements
+        Index element_count;
+        cudaMemcpy(&element_count, &(row_counts[dense.rows]), sizeof(Index), cudaMemcpyKind::cudaMemcpyDeviceToHost);
 
-        //Iterate through the matrix again and copy elements and indices
-        offset = 0;
-        for(Index row(0); row < dense.rows; row++){
-            for(Index column(0); column < dense.columns; column++){
-                if (abs(dense.data[row * dense.rows + column]) <= epsilon){
-                    offset++;
-                    column_indices[offset] = column;
-                    values[offset] = dense.data[dense.data[row * dense.rows + column]];
-                }
-            }
-        }
+        //allocate space for indices and values on the gpu
+        Index* column_indices;
+        Value* values;
+        cudaMalloc(&column_indices, sizeof(Index) * element_count.rows );
+        cudaMalloc(&values, sizeof(Value) * element_count.rows );
 
-        return MatrixCSR<Value, Index>{dense.rows, dense.columns, element_count,
-                                       values, column_indices, row_offsets};
+        //Iterate through the matrix again and copy element_count and indices
+        impl::copyElementsAndColumnIndices<<<dense.rows > GRID_DIM ? GRID_DIM : dense.rows, warpSize>>>(
+                dense.data,
+                row_counts,
+                column_indices,
+                values,
+                dense.rows,
+                dense.columns,
+                epsilon
+                );
+
+        return MatrixCSRDev<Value, Index>{dense.rows, dense.columns, element_count,
+                                       values, column_indices, row_counts};
     }
 }
 
