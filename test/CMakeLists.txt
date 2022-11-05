@@ -5,3 +5,4 @@ add_test(NAME "smokeTest" COMMAND smokeTest)
 
 add_subdirectory(types)
 add_subdirectory(conversions)
+add_subdirectory(add)

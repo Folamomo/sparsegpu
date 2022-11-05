@@ -6,3 +6,4 @@ target_sources(sparsegpu
 add_subdirectory(transfer)
 add_subdirectory(types)
 add_subdirectory(conversions)
+add_subdirectory(add)
